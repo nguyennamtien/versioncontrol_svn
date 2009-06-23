@@ -134,4 +134,4 @@ php [path_to_svn]/hooks/xsvn/xsvn-post-unlock.php [path_to_svn]/hooks/xsvn/xsvn-
 
 AUTHOR
 ------
-Daniel Hackney ("chrono325", http://drupal.org/user/384635)
+Daniel Hackney ("dhax", http://drupal.org/user/384635)
