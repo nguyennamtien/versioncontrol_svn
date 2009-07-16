@@ -61,14 +61,12 @@ function _versioncontrol_svn_log_update_repository(&$repository) {
     return t('No new log entries to fetch.');
   }
 
-  // Defaults to using --xml and the basic svnlog xml output parser.
   $revisions = $repo->svn('log')
     ->setParser(new VersioncontrolSvnLogHandler($repo, $last_revision + 1, $latest_rev))
     ->target('.')->revision($last_revision + 1, $latest_rev)->verbose()
-    ->execute();
+    ->execute(1);
 
   foreach ($revisions as $revision) { // processing the oldest revision first
-    // $actions = svnlib_more_log_info($revision, $repo);
     $operation = array(
       'type' => VERSIONCONTROL_OPERATION_COMMIT,
       'repository' => $repository,

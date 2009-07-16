@@ -10,46 +10,18 @@
 define('SVNLIB_LIBXML_FLAGS', LIBXML_VERSION >= 20621 ? LIBXML_COMPACT | LIBXML_NONET : LIBXML_NONET);
 
 /**
- * Dummy parser class that transparently passes output straight back without
- * any modification, but still implements the CLIParser interface so as to
- * reduce complexity in CLICommand implementations.
- */
-class DummyParser implements CLIParser {
-  protected $output;
-
-  public function __construct() {}
-  public function openOutputHandle() {
-    $this->output = fopen('php://temp', 'rw');
-    return $this->output;
-  }
-
-  public function parseOutput() {
-    rewind($this->output);
-    return stream_get_contents($this->output);
-  }
-
-  public function clear() {}
-
-  public function procClose($destruct = FALSE) {
-    if (is_resource($this->output)) {
-      fclose($this->output);
-    }
-  }
-}
-
-/**
  * XML-based parsers.
  */
 
-abstract class SvnXMLOutputHandler extends IteratorIterator implements CLIParser {
-  protected $output;
+abstract class SvnXMLOutputHandler extends IteratorIterator implements ProcOutputPipe {
+  protected $pipe;
 
   /**
    * Override the IteratorIterator constructor so that it's possible to create
    * the object before we have output for it to parse and make iterable.
    */
   public function __construct() {}
-  
+
   /**
    * Delayed backdoor into the IteratorIterator constructor.
    * @param Iterator $it
@@ -58,9 +30,8 @@ abstract class SvnXMLOutputHandler extends IteratorIterator implements CLIParser
     parent::__construct($it);
   }
 
-  public function parseOutput() {
-    rewind($this->output); // superfluous?
-    $this->build(new SimpleXMLIterator(stream_get_contents($this->output)), SVNLIB_LIBXML_FLAGS);
+  public function procHandle() {
+    $this->build(new SimpleXMLIterator(stream_get_contents($this->pipe)), SVNLIB_LIBXML_FLAGS);
     return $this;
   }
 
@@ -68,9 +39,12 @@ abstract class SvnXMLOutputHandler extends IteratorIterator implements CLIParser
     return $this->parse($this->getInnerIterator()->current());
   }
 
-  public function openOutputHandle() {
-    $this->output = fopen('php://temp', 'rw');
-    return $this->output;
+  public function getOutputDescriptor() {
+    return array('pipe', 'w');
+  }
+
+  public function connectIn(&$pipe) {
+    $this->pipe = &$pipe;
   }
 
   // abstract public function parseOutput();
@@ -78,8 +52,8 @@ abstract class SvnXMLOutputHandler extends IteratorIterator implements CLIParser
 
   public function procClose($destruct = FALSE) {
     // FIXME: this check should probably be made superfluous, but it's throwing an error atm.
-    if (is_resource($this->output)) {
-      fclose($this->output);
+    if (is_resource($this->pipe)) {
+      fclose($this->pipe);
     }
   }
 
@@ -95,9 +69,9 @@ abstract class SvnXMLOutputHandler extends IteratorIterator implements CLIParser
  */
 class SvnInfoXMLParser extends SvnXMLOutputHandler implements SeekableIterator {
 
-  protected function parse($entry, $decode = FALSE) {
+  protected function parse($entry) {
     $item = array(
-      'url'             => $decode ? rawurldecode($entry->url) : (string) $entry->url,
+      'url'             => rawurldecode($entry->url),
       'repository_root' => (string) $entry->repository->root,
       'repository_uuid' => (string) $entry->repository->uuid,
       'type'            => (string) $entry['kind'],
@@ -118,12 +92,11 @@ class SvnInfoXMLParser extends SvnXMLOutputHandler implements SeekableIterator {
     elseif (isset($args['rev']) xor isset($args['path'])) {
       return isset($args['rev']) ? $this->seekRev($args['rev']) : $this->seekPath($args['path']);
     }
-    throw new Exception('No arguments provided for xpath query.', E_RECOVERABLE_ERROR);
+    throw new InvalidArgumentException('No arguments provided for xpath query.', E_RECOVERABLE_ERROR);
   }
 
   public function seekRev($rev) {
     $items = array();
-    // foreach ($this->parse($this->getInnerIterator()->xpath("/info/entry[@revision='$rev']")) as $item) {
     foreach ($this->getInnerIterator()->xpath("/info/entry[@revision='$rev']") as $entry) {
       $item = $this->parse($entry, TRUE);
       $items[$item['path']] = $item;
@@ -133,7 +106,6 @@ class SvnInfoXMLParser extends SvnXMLOutputHandler implements SeekableIterator {
 
   public function seekPath($path) {
     $items = array();
-    // foreach ($this->parse($this->getInnerIterator()->xpath("/info/entry[@path='$path']")) as $item) {
     foreach ($this->getInnerIterator()->xpath("/info/entry[url = '$path']") as $entry) {
       $item = $this->parse($entry, TRUE);
       $items[$item['rev']] = $item;
@@ -142,8 +114,6 @@ class SvnInfoXMLParser extends SvnXMLOutputHandler implements SeekableIterator {
   }
 
   public function seekBoth($rev, $path) {
-//    foreach ($this->getInnerIterator()->xpath("/info/entry[@revision='$rev'][url=concat(.//root,'/','$path')]") as $entry) {
-//    foreach ($this->getInnerIterator()->xpath("/info/entry[@revision='$rev']/url[contains(.,'$path')]/..") as $entry) {
     foreach ($this->getInnerIterator()->xpath("/info/entry[@revision='$rev' and url='$path']") as $entry) {
       $item = $this->parse($entry, TRUE);
       if (!$item['url'] == $item['repository_root'] . DIRECTORY_SEPARATOR . $path) {
@@ -191,7 +161,7 @@ class SvnLogXMLParser extends SvnXMLOutputHandler implements SeekableIterator {
           // $parents = $rev->xpath("paths/path[@action = 'A' and @copyfrom-rev and @copyfrom-path != '$path[path]' and starts-with('$path[path]',.)]");
           $parents = $rev->xpath("paths/path[@action = 'A' and @copyfrom-rev and starts-with('$path[path]',.)]");
           if (count($parents) > 1) {
-            throw new Exception("Multiple possible copy+delete parents found for $path[path]@$revision[rev]; cannot currently handle this.", E_ERROR);
+            throw new UnexpectedValueException("Multiple possible copy+delete parents found for $path[path]@$revision[rev]; cannot currently handle this.", E_ERROR);
           }
           else {
             $add_path = array_shift($parents);
@@ -205,7 +175,7 @@ class SvnLogXMLParser extends SvnXMLOutputHandler implements SeekableIterator {
               );
             }
             else {
-              throw new Exception('Blargh', E_ERROR);
+              throw new RuntimeException('Blargh', E_ERROR);
             }
           }
         }

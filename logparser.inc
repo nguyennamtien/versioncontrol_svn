@@ -1,6 +1,6 @@
 <?php
 
-class VersioncontrolSvnLogHandler implements CLIParser, Iterator {
+class VersioncontrolSvnLogHandler implements ProcOutputPipe, Iterator {
   /**
    *
    * @var SvnInfo
@@ -30,16 +30,16 @@ class VersioncontrolSvnLogHandler implements CLIParser, Iterator {
 
   protected $firstRev, $lastRev, $currentRev;
   protected $ready = FALSE;
-  
+
   public function __construct(SvnInstance $instance, $first_rev, $last_rev) {
     $this->instance = $instance;
     $this->firstRev = $first_rev;
     $this->lastRev = $last_rev;
     $this->log = new VersioncontrolSvnLogParser();
   }
-  
-  public function openOutputHandle() {
-    return $this->log->openOutputHandle();
+
+  public function getOutputDescriptor() {
+    return $this->log->getOutputDescriptor();
   }
 
   /**
@@ -53,8 +53,8 @@ class VersioncontrolSvnLogHandler implements CLIParser, Iterator {
    *
    * @return VersioncontrolSvnLogHandler
    */
-  public function parseOutput() {
-    $this->log->parseOutput();
+  public function procHandle() {
+    $this->log->procHandle();
     // Outer revisions loop; each iteration deals encomapsses a single revision.
     foreach ($this->log as $revision) {
       // Inner revisions loop; each iteration encompasses with a single path on
@@ -88,10 +88,6 @@ class VersioncontrolSvnLogHandler implements CLIParser, Iterator {
         }
       } // end inner revisions loop
     } // end outer revisions loop
-//    // All queued up - fire it and store the resulting info parser.
-//    $this->info = $this->aggregateInfo->execute();
-//    // Kill aggregateinfo to free memory - it can easily contain LOTS of objects
-//    unset($this->aggregateInfo);
     $this->ready = TRUE;
     return $this;
   }
@@ -148,7 +144,7 @@ class VersioncontrolSvnLogHandler implements CLIParser, Iterator {
   protected function pointersToCurrentRev() {
     // Retrieve the revision data from the cached xml output of svn log.
     $this->revision = $this->log->seek($this->currentRev);
-    $this->info = $this->aggregateInfo[$this->currentRev]->execute();
+    $this->info = $this->aggregateInfo[$this->currentRev]->execute(1);
     $this->actions = &$this->revision['paths'];
     $this->opRevInfo = &$this->opRevAggregator[$this->currentRev];
     if ($this->opRevInfo instanceof SvnInfo) {
@@ -167,7 +163,6 @@ class VersioncontrolSvnLogHandler implements CLIParser, Iterator {
     $this->pointersToCurrentRev();
     // Retrieve all info items for the current revision.
     foreach ($this->info->seekRev($this->currentRev) as $path => $info_item) {
-      // $path = $info_item['path']; // REFACTORED OUT
       if (empty($this->actions[$path])) {
         continue; // means we're on one that was called up by somethin else
       }
@@ -186,7 +181,7 @@ class VersioncontrolSvnLogHandler implements CLIParser, Iterator {
     // output handler. Mind that these can have different paths than the current
     // item.
     if (!empty($this->opRevInfo) && $this->opRevInfo instanceof SvnInfo) {
-      foreach ($this->opRevInfo->execute() as $info_item) {
+      foreach ($this->opRevInfo->execute(1) as $info_item) {
         $this->actions[$info_item['path']]['source_item'] = self::itemFromInfo($info_item);
       }
     }
@@ -198,8 +193,6 @@ class VersioncontrolSvnLogHandler implements CLIParser, Iterator {
     // of more 'svn info' invocations by removing the corresponding 'D' actions.
     foreach ($this->actions as &$action) {
       // TODO check and make sure this is right - encomapsses both A and R
-      // FIXME this section needs work. More of it needs to be resolved back in
-      // the xml parsing stage.
       if ($action['action'] & VERSIONCONTROL_SVN_ACTION_CHANGE && isset($action['source_item'])) {
         // Search through all other items if they contain the source item
         // of this add action.
@@ -228,25 +221,6 @@ class VersioncontrolSvnLogHandler implements CLIParser, Iterator {
     // Fourth step: retrieve the source items of the given path,
     // and construct the $action info array for that path.
     foreach ($this->actions as $path => &$action) {
-      // In case there was a modified item of which the parent was moved
-      // to a new location just in this very revision, it has been missing
-      // from the retrieved modified items further above, which means the
-      // remaining ones could not be mapped to their actions.
-      // In order to map them anyways, we have to retrieve them one by one -
-      // which is slow, but will hardly ever occur anyways.
-      //
-      // REFACTORED *** this should never EVER happen (Can't remember why, now...damn)
-//      if ($actions[$path]['action'] == 'M' && !isset($actions[$path]['source_item'])) {
-//        $source_items = svnlib_info_cached($actions[$path]['url'], $revision['rev'], $revision['rev'] - 1);
-//        if ($source_items) {
-//          $source_item = reset($source_items); // first item
-//          $actions[$path]['source_item'] = self::itemFromInfo($source_item);
-//        }
-//      }
-
-      // Ok, that was the easy part - 'M' and 'A' are covered and should now
-      // have a current item (in all cases) and source item (if it existed).
-      // The hard part is 'D'.
       if ($action['action'] & VERSIONCONTROL_SVN_ACTION_DELETE) {
         // If the original type was 'R', we essentially have two actions:
         // one delete action and one add/move/copy action. We now have the data
@@ -293,6 +267,10 @@ class VersioncontrolSvnLogHandler implements CLIParser, Iterator {
       'path' => $info['path'],
       'rev' => $info['created_rev'],
     );
+  }
+
+  public function connectIn(&$pipe) {
+    $this->log->connectIn($pipe);
   }
 
   public function procClose($destruct = FALSE) {
