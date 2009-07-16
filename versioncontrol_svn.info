@@ -4,3 +4,4 @@ description = "Provides Subversion commit information and account management as 
 dependencies[] = versioncontrol
 package = Version Control
 core = 6.x
+php = 5.2
