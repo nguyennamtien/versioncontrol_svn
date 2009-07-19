@@ -13,22 +13,11 @@ class VersioncontrolSvnRepository extends VersioncontrolRepository {
   public $path_tags;
   public $is_working_copy;
 
-  protected function buildSelf() {
-    $data = db_fetch_array(db_query("
-      SELECT
-      vr.name, vr.root, vr.authorization_method, vr.url_backend, vr.data,
-      vsr.update_method, vsr.updated, vsr.last_revision, vsr.auth_username,
-      vsr.auth_password, vsr.path_trunk, vsr.path_branches, vsr.path_tags,
-      vsr.is_working_copy
-      FROM {versioncontrol_repositories} vr
-      INNER JOIN {versioncontrol_svn_repositories} vsr ON vr.repo_id = vsr.repo_id
-      WHERE vr.repo_id = %d",
-      $this->repo_id));
-
-    $serialized = array('data', 'auth_username', 'auth_password', 'path_trunk', 'path_branches', 'path_tags');
-    foreach ($data as $key => $value) {
-      $this->$key = in_array($key, $serialized) ? unserialize($value) : $value;
-    }
+  protected function buildQuery() {
+    $query = parent::buildQuery();
+    $query->join('versioncontrol_svn_repositories', 'vsr', 'vr.repo_id = vsr.repo_id AND vr.repo_id = :id', array(':id' => $this->repo_id));
+    $query->fields('vsr', drupal_schema_fields_sql('versioncontrol_svn_repositories'));
+    return $query;
   }
 
   public function build($args = array()) {
