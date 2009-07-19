@@ -14,6 +14,7 @@ define('VERSIONCONTROL_SVN_UPDATE_XSVN', 2);
 
 // The admin and user edit pages.
 include_once(drupal_get_path('module', 'versioncontrol_svn') .'/versioncontrol_svn.forms.inc');
+require_once(drupal_get_path('module', 'versioncontrol_svn') .'/classes.inc');
 
 define('VERSIONCONTROL_SVN_ACTION_DELETE', 0x001);
 define('VERSIONCONTROL_SVN_ACTION_CHANGE', 0x002);
@@ -88,6 +89,9 @@ function versioncontrol_svn_versioncontrol_backends() {
         // {versioncontrol_svn_repositories} and versioncontrol_get_repositories()
         // will automatically fetch it from there.
         VERSIONCONTROL_FLAG_AUTOADD_REPOSITORIES,
+      ),
+      'classes' => array(
+        'repo' => 'VersioncontrolSvnRepository',
       ),
     ),
   );
